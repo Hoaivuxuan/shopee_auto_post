@@ -1,9 +1,0 @@
-{
-  "pages": [
-    {
-      "name": "Tên Page",
-      "id": "PAGE_ID",
-      "token": "PAGE_ACCESS_TOKEN"
-    }
-  ]
-}

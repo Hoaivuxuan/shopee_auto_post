@@ -1,7 +1,9 @@
-// Dán toàn bộ nội dung file này vào Apps Script của Google Sheet (Tiện ích mở rộng > Apps Script).
-// BẮT BUỘC đổi TOKEN thành một chuỗi bí mật do bạn tự đặt (nên dài 20 ký tự trở lên).
-// Bản 2: hỗ trợ cả tab tải video (tab đầu tiên) lẫn tab đăng bài Facebook (tab "Dang_bai").
-const TOKEN = "DOI_TOKEN_BI_MAT_CUA_BAN";
+"""Mã Google Apps Script cho phần cầu nối Google Sheet (token được chèn khi sao chép)."""
+
+CODE = r'''// Mã Apps Script cho Shopee → Facebook Tool.
+// Dán toàn bộ vào Apps Script của Google Sheet (Tiện ích mở rộng > Apps Script), rồi Triển khai (Deploy) dạng Web app.
+// Token bên dưới phải giống token trong chương trình.
+const TOKEN = "__TOKEN__";
 const SHEET_NAME = ""; // tab tải video: để trống = dùng tab đầu tiên; hoặc điền đúng tên tab
 
 function getSheet_() {
@@ -26,6 +28,14 @@ function doPost(e) {
   try {
     const req = JSON.parse(e.postData.contents);
     if (req.token !== TOKEN) return out_({ ok: false, error: "Sai token" });
+
+    // Kiểm tra kết nối: trả về tên file, tên tab và số dòng
+    if (req.action === "ping") {
+      const ss0 = SpreadsheetApp.getActiveSpreadsheet();
+      const t0 = getTab_(req.tab, false);
+      if (!t0) return out_({ ok: false, error: "Không tìm thấy tab: " + req.tab });
+      return out_({ ok: true, name: ss0.getName(), tab: t0.getName(), rows: t0.getLastRow() });
+    }
 
     // ===== Các hành động cho tab tùy chọn (dùng cho đăng bài Facebook) =====
 
@@ -136,3 +146,4 @@ function doPost(e) {
     return out_({ ok: false, error: String(err) });
   }
 }
+'''

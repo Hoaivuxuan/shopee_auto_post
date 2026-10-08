@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "shopeetool"
+description = "Tải video sản phẩm Shopee theo Google Sheet và đăng lên nhiều Facebook Page"
+readme = "README.md"
+requires-python = ">=3.10"
+dynamic = ["version", "dependencies"]
+
+[project.optional-dependencies]
+dev = [
+    "ruff>=0.11",
+    "pre-commit>=3.5",
+    "pyinstaller>=6",
+]
+
+[tool.setuptools]
+packages = ["shopeetool"]
+
+[tool.setuptools.dynamic]
+version = { attr = "shopeetool.VERSION" }
+dependencies = { file = ["requirements.txt"] }
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+extend-exclude = ["build", "dist"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "B"]
+# E501: chuỗi giao diện tiếng Việt dài; E731: các lambda ngắn kiểu S = lambda v: ... được dùng có chủ đích
+ignore = ["E501", "E731"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["E702"]

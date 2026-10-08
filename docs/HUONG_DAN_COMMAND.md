@@ -146,7 +146,7 @@ Khác biệt cần nhớ:
 - Mặc định nghỉ giữa 2 bài đăng là 10-30 giây (script cũ là 120-300 giây). Đổi bằng `--min-delay` và `--max-delay`.
 - Chương trình mới không còn dùng `yt-dlp`; video được bắt trực tiếp từ trình duyệt.
 - Cấu hình nằm trong `data\config.json` thay vì các biến môi trường `SHEET_URL`, `SHEET_TOKEN`.
-- Cần Apps Script bản mới (nút **Sao chép mã Apps Script** trong giao diện, hoặc file `apps_script_Code.gs`).
+- Cần Apps Script bản mới (nút **Sao chép mã Apps Script** trong giao diện; mã gốc nằm trong `shopeetool/appscript.py`).
 
 ## 7. Lỗi thường gặp khi dùng lệnh
 

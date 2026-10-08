@@ -1,0 +1,11 @@
+* text=auto
+
+# cmd.exe đọc sai file .bat dùng LF
+*.bat text eol=crlf
+*.cmd text eol=crlf
+# bash báo lỗi "$'\r': command not found" nếu file .sh dùng CRLF
+*.sh text eol=lf
+
+*.zip binary
+*.exe binary
+*.mp4 binary

@@ -1,110 +1,113 @@
-# Shopee Auto Post
+# Shopee Auto Post (Shopee → Facebook Tool)
 
-Bộ công cụ Python tự động **tải video sản phẩm Shopee** từ danh sách link trong **Google Sheet**, sau đó **đăng video lên một hoặc nhiều Facebook Page** (đăng ngay hoặc hẹn giờ) và **ghi trạng thái vào lại sheet**.
+Ứng dụng cho **Windows và Ubuntu** (giao diện Tkinter + dòng lệnh, dùng chung một mã nguồn) tự động **tải video sản phẩm Shopee** theo danh sách link trong **Google Sheet**, sau đó **đăng video lên một hoặc nhiều Facebook Page** (đăng ngay hoặc hẹn giờ) và **ghi trạng thái vào lại sheet**.
 
 > Chỉ dùng cho video bạn có quyền sử dụng (video của bạn, hoặc shop/chủ video đã đồng ý). Tự động hóa trên Shopee/Facebook có rủi ro với tài khoản, nên dùng tài khoản phụ và không chạy dồn dập.
 
 ## Tính năng
 
-- Mở trình duyệt thật (Playwright/Chromium), bắt link video `.mp4` / `.m3u8` giống tab Network (F12) rồi tải về.
-- Đọc/ghi Google Sheet qua **Google Apps Script Web app** (miễn phí, không cần Google Cloud) hoặc qua **gspread + Service Account**.
-- Đăng video lên nhiều Facebook Page bằng **Graph API**, hỗ trợ:
-  - Đăng ngay hoặc hẹn giờ (tự đăng khi đến giờ, hoặc nhờ Facebook hẹn giờ).
-  - Nội dung + link affiliate + hashtag, tùy chọn đưa link vào bình luận đầu tiên.
-  - Chạy lại các dòng lỗi / đăng nốt các Page chưa thành công, chống đăng trùng.
-  - Tự dừng khi Facebook giới hạn tốc độ.
-- Chế độ chạy liên tục (`--watch`), chạy thử (`--dry-run`), nghỉ ngẫu nhiên giữa các lượt.
+- Mở trình duyệt thật (Edge/Chrome qua Playwright), bắt link video `.mp4` / `.m3u8` rồi tải về (ghi ra file `.part`, tải xong mới đổi tên).
+- Đọc/ghi Google Sheet qua **Google Apps Script Web app** (miễn phí, không cần Google Cloud).
+- Đăng video lên nhiều Facebook Page bằng **Graph API**: đăng ngay hoặc hẹn giờ, link affiliate + hashtag, tùy chọn đưa link vào bình luận đầu tiên, chạy lại dòng lỗi / đăng nốt Page chưa thành công, chống đăng trùng, tự dừng khi Facebook giới hạn tốc độ.
+- Chế độ: chỉ tải, chỉ đăng, tải rồi đăng, tải và đăng song song; tự chạy lại mỗi N phút; chạy thử (dry-run).
+- Nhật ký tự che token/URL bí mật.
 
 ## Cấu trúc thư mục
 
 ```
 shopee_auto_post/
-├── README.md
-├── .gitignore
-└── Shopee/
-    ├── shopee_video_dl.py          # Tải video từ 1 link (yt-dlp, link .mp4 trực tiếp, .m3u8 qua ffmpeg)
-    ├── shopee_capture_video.py     # Mở trình duyệt bắt link video, đăng nhập Shopee (--login)
-    ├── shopee_batch_appsscript.py  # Tải video hàng loạt từ Google Sheet qua Apps Script
-    ├── shopee_batch_gsheet.py      # Tải video hàng loạt từ Google Sheet qua gspread (Service Account)
-    ├── shopee_fb_post.py           # Đăng video đã tải lên Facebook Page, quản lý Page/token
-    ├── apps_script_Code.gs         # Mã Google Apps Script (Web app) để đọc/ghi sheet
-    ├── pages.example.json          # Mẫu file cấu hình Page (copy thành pages.json)
-    ├── chay_tat_ca.bat             # Chạy lần lượt: tải video -> đăng Facebook
-    ├── chay_song_song.bat          # Chạy song song 2 cửa sổ: tải video và đăng Facebook
-    ├── ShopeeFBTool_v1.0.zip       # Bản đóng gói có giao diện (GUI) của công cụ
-    ├── HUONG_DAN_SU_DUNG.md        # Hướng dẫn sử dụng bản giao diện
-    ├── HUONG_DAN_KET_NOI.md        # Hướng dẫn kết nối Google Sheet và Facebook Page
-    └── HUONG_DAN_COMMAND.md        # Hướng dẫn dòng lệnh
+├── app.py                  # Điểm vào: không tham số = giao diện; `app.py cli <lệnh>` = dòng lệnh
+├── shopeetool/
+│   ├── __init__.py         # VERSION, APP_TITLE (phiên bản chỉ khai báo ở đây)
+│   ├── platforms.py        # MỌI khác biệt Windows/Ubuntu: thư mục dữ liệu, trình duyệt, ffmpeg, font...
+│   ├── config.py           # Đọc/ghi data/config.json, giá trị mặc định
+│   ├── paths.py            # Thư mục chương trình / dữ liệu / tài nguyên
+│   ├── logger.py           # RunContext: nhật ký, thống kê, hủy giữa chừng
+│   ├── sheet.py            # SheetClient gọi Apps Script
+│   ├── appscript.py        # Mã Google Apps Script (chèn token khi sao chép)
+│   ├── shopee.py           # Đăng nhập, bắt link video, tải video
+│   ├── facebook.py         # Graph API: token, Page, đăng video, bình luận
+│   ├── jobs.py             # Nghiệp vụ: run_download, run_post, run_all
+│   ├── cli.py              # Lệnh dòng lệnh
+│   ├── gui.py, mdview.py   # Giao diện
+│   └── syscheck.py         # Kiểm tra môi trường
+├── tests/
+│   ├── test_core.py        # Test logic lõi với Sheet/Facebook giả (không cần mạng)
+│   └── gui_smoke.py        # Test giao diện (Linux + Xvfb)
+├── scripts/
+│   ├── build.py            # Logic đóng gói PyInstaller dùng chung cho 2 hệ điều hành
+│   ├── windows/            # chay_ung_dung.bat, build_exe.bat
+│   └── ubuntu/             # setup.sh, chay_ung_dung.sh, build.sh
+├── docs/                   # Hướng dẫn sử dụng (hiển thị cả trong tab "Hướng dẫn")
+├── requirements.txt        # Thư viện khi chạy (pyproject.toml đọc từ file này)
+└── pyproject.toml          # Metadata, thư viện dev, cấu hình ruff
 ```
 
-Các file/thư mục sinh ra khi chạy (đã được `.gitignore` loại bỏ vì chứa dữ liệu nhạy cảm hoặc dung lượng lớn):
+Dữ liệu khi chạy nằm trong `data/` cạnh `app.py` (nếu không ghi được thì dùng `%LOCALAPPDATA%\ShopeeFBTool` trên Windows, `~/.local/share/ShopeeFBTool` trên Ubuntu), đã được `.gitignore` loại bỏ:
 
 | File / thư mục | Nội dung |
 |---|---|
-| `pages.json` | Danh sách Page và **Page access token** |
-| `shopee_state.json` | Cookie phiên đăng nhập Shopee |
-| `browser_profile/` | Dữ liệu trình duyệt |
-| `service_account.json` | Khóa Service Account Google (nếu dùng `shopee_batch_gsheet.py`) |
-| `videos/` | Video đã tải |
+| `data/config.json` | Cấu hình, **token Apps Script, App Secret, Page token** |
+| `data/shopee_state.json` | Cookie phiên đăng nhập Shopee |
+| `data/videos/` | Video đã tải |
+| `data/logs/` | Nhật ký theo ngày |
 
-## Yêu cầu
+## Windows
 
-- Windows, Python 3.9+ (dùng lệnh `py`).
-- [ffmpeg](https://ffmpeg.org/download.html) (cần khi video là luồng `.m3u8`), ví dụ `winget install ffmpeg`.
+| Việc | Cách làm |
+|---|---|
+| Chạy từ mã nguồn | Bấm đúp `scripts\windows\chay_ung_dung.bat` (lần đầu tự cài thư viện) |
+| Đóng gói | Bấm đúp `scripts\windows\build_exe.bat` → `dist\ShopeeFBTool\ShopeeFBTool.exe` và `dist\ShopeeFBTool-<phiên bản>-windows.zip` |
+| Máy đích | Windows 10/11, có Microsoft Edge (có sẵn) hoặc Google Chrome |
 
-Cài thư viện:
+## Ubuntu
 
-```bash
-py -m pip install playwright requests yt-dlp
-py -m playwright install chromium
-# Chỉ khi dùng shopee_batch_gsheet.py
-py -m pip install gspread
-```
+| Việc | Cách làm |
+|---|---|
+| Cài lần đầu | `./scripts/ubuntu/setup.sh` (apt + `.venv` + Chromium của Playwright, cần sudo) |
+| Chạy từ mã nguồn | `./scripts/ubuntu/chay_ung_dung.sh` (giao diện) hoặc `./scripts/ubuntu/chay_ung_dung.sh cli <lệnh>` |
+| Đóng gói | `./scripts/ubuntu/build.sh` → `dist/ShopeeFBTool/ShopeeFBTool` và `dist/ShopeeFBTool-<phiên bản>-ubuntu.tar.gz` |
+| Máy đích | Ubuntu 22.04/24.04, có Google Chrome (gói .deb) |
 
-## Thiết lập lần đầu
+Chi tiết (cron, xvfb, lỗi thường gặp): [HUONG_DAN_UBUNTU.md](docs/HUONG_DAN_UBUNTU.md).
 
-### 1. Google Sheet + Apps Script
+Hướng dẫn chung: [HUONG_DAN_SU_DUNG.md](docs/HUONG_DAN_SU_DUNG.md), [HUONG_DAN_KET_NOI.md](docs/HUONG_DAN_KET_NOI.md), [HUONG_DAN_COMMAND.md](docs/HUONG_DAN_COMMAND.md).
 
-1. Tạo Google Sheet, vào **Tệp > Cài đặt**: Ngôn ngữ = Việt Nam, Múi giờ = (GMT+07:00) Hà Nội.
-2. Vào **Tiện ích mở rộng > Apps Script**, dán nội dung `Shopee/apps_script_Code.gs`, **đổi `TOKEN`** thành chuỗi bí mật của bạn.
-3. **Triển khai > Tùy chọn triển khai mới > Web app**, `Execute as: Me`, `Who has access: Anyone`, copy **Web app URL** (kết thúc `/exec`).
-4. Đặt biến môi trường để khỏi phải truyền `--url`, `--token` mỗi lần:
+## Phát triển
 
-```bash
-setx SHEET_URL "https://script.google.com/macros/s/.../exec"
-setx SHEET_TOKEN "TOKEN_CUA_BAN"
-```
-
-Chi tiết xem [HUONG_DAN_KET_NOI.md](Shopee/HUONG_DAN_KET_NOI.md).
-
-### 2. Đăng nhập Shopee (lưu phiên)
+Yêu cầu: Python 3.10+, [ffmpeg](https://ffmpeg.org/download.html) (chỉ cần cho video `.m3u8`).
 
 ```bash
-cd Shopee
-py shopee_capture_video.py --login
+# Windows                              # Ubuntu
+py -m venv .venv                       ./scripts/ubuntu/setup.sh
+.venv\Scripts\activate                 source .venv/bin/activate
+pip install -e ".[dev]"                pip install -e ".[dev]"
+pre-commit install                     pre-commit install
 ```
 
-### 3. Facebook Page
-
-Cần một app trên [Meta for Developers](https://developers.facebook.com) với quyền `pages_show_list`, `pages_manage_posts`, `publish_video`.
+Chạy (sau khi activate `.venv`):
 
 ```bash
-# Đổi token ngắn hạn sang token dài hạn
-py shopee_fb_post.py --exchange APP_ID APP_SECRET TOKEN_NGAN_HAN
-# Lấy tất cả Page (chạy lại để thêm Page mới / làm mới token)
-py shopee_fb_post.py --sync-pages TOKEN_DAI_HAN
-# Hoặc thêm tay một Page
-py shopee_fb_post.py --add-page "Tên Page" PAGE_ID PAGE_TOKEN
-# Xem danh sách
-py shopee_fb_post.py --list-pages
+python app.py                 # giao diện
+python app.py cli             # danh sách lệnh
+python app.py cli check       # kiểm tra môi trường
+python app.py cli post --dry-run
 ```
 
-### 4. Tạo tiêu đề cột trong sheet
+Kiểm tra trước khi commit:
 
 ```bash
-py shopee_batch_appsscript.py --init   # cột A-E (tải video)
-py shopee_fb_post.py --init            # cột F-N (đăng bài)
+ruff check .
+python tests/test_core.py
 ```
+
+Quy ước:
+- Phiên bản chỉ sửa ở `shopeetool/__init__.py` (`VERSION`); `pyproject.toml` tự đọc.
+- Thêm thư viện chạy vào `requirements.txt`; thư viện chỉ dùng khi phát triển vào `[project.optional-dependencies].dev` trong `pyproject.toml`.
+- Code khác nhau giữa Windows và Ubuntu chỉ đặt trong `shopeetool/platforms.py`; module khác không tự kiểm tra `os.name`.
+- Script riêng từng hệ điều hành nằm ở `scripts/windows/` (CRLF) và `scripts/ubuntu/` (LF, có quyền thực thi); logic đóng gói chung ở `scripts/build.py`.
+- Không commit file nhị phân (`.zip`, `.exe`, `.tar.gz`, video). Bản đóng gói build bằng script trong `scripts/`.
+- Mã Apps Script nằm trong `shopeetool/appscript.py`; sửa xong cần triển khai **phiên bản mới** của Web app.
 
 ## Cấu trúc Google Sheet (tab đầu tiên)
 
@@ -121,48 +124,6 @@ py shopee_fb_post.py --init            # cột F-N (đăng bài)
 
 Chỉ dòng có cột B = `Thành công` (đã tải xong) và đã điền cột F mới được đăng.
 
-## Sử dụng
-
-### Tải video
-
-```bash
-# Một link
-py shopee_capture_video.py "https://shopee.vn/..."
-py shopee_video_dl.py --video-url "https://.../abc.mp4"
-
-# Hàng loạt từ Google Sheet (Apps Script)
-py shopee_batch_appsscript.py --limit 10
-py shopee_batch_appsscript.py --retry --show
-
-# Hàng loạt từ Google Sheet (gspread + service_account.json)
-py shopee_batch_gsheet.py --sheet "LINK_SHEET"
-```
-
-Tùy chọn chính: `--out` (thư mục lưu, mặc định `videos`), `--limit`, `--wait` (giây chờ video), `--min-delay/--max-delay` (nghỉ giữa 2 link), `--show` (hiện trình duyệt), `--retry` (chạy lại dòng lỗi).
-
-### Đăng Facebook
-
-```bash
-py shopee_fb_post.py --dry-run                 # chạy thử, không đăng thật
-py shopee_fb_post.py                           # đăng thật
-py shopee_fb_post.py --watch 5                 # quét lại mỗi 5 phút
-py shopee_fb_post.py --schedule facebook       # nhờ Facebook hẹn giờ (máy tắt vẫn đăng)
-py shopee_fb_post.py --retry                   # đăng nốt các dòng Lỗi / Một phần
-```
-
-Tùy chọn khác: `--tab`, `--limit` (mặc định 5), `--min-delay/--max-delay` (mặc định 120-300 giây), `--link-in-comment`, `--link-prefix "Mua tại: "`, `--videos`, `--pages`, `--api-version` (mặc định `v25.0`).
-
-**Hẹn giờ:**
-- `--schedule local` (mặc định): chương trình tự đăng khi đến giờ, máy phải bật và job đang chạy (`--watch` hoặc Task Scheduler).
-- `--schedule facebook`: tải video lên ngay, Facebook tự đăng đúng giờ. Giờ hẹn phải cách hiện tại khoảng 12 phút đến 29 ngày.
-
-### Chạy bằng file .bat
-
-- `chay_tat_ca.bat`: tải video rồi đăng Facebook lần lượt (có thể đặt lịch bằng Task Scheduler).
-- `chay_song_song.bat`: mở 2 cửa sổ, một cửa sổ tải video, một cửa sổ quét mỗi 2 phút để đăng video vừa tải xong.
-
-> Hai file `.bat` đang trỏ tới thư mục `D:\Shopee`, sửa lại đường dẫn `cd /d` cho đúng nơi bạn đặt source.
-
 ## Trạng thái trong sheet
 
 | Trạng thái | Ý nghĩa | Cách xử lý |
@@ -175,14 +136,14 @@ Tùy chọn khác: `--tab`, `--limit` (mặc định 5), `--min-delay/--max-dela
 | Lỗi (cột K) | Không đăng được, xem cột N | Sửa nguyên nhân rồi chạy lại |
 | Đang xử lý | Bị dừng giữa chừng | Kiểm tra trên Facebook; nếu chưa có bài thì xóa ô đó để chạy lại |
 
+## Chuyển từ bản script cũ (thư mục `Shopee/`)
+
+Các script lẻ (`shopee_fb_post.py`, `shopee_batch_appsscript.py`, ...) đã được thay bằng `app.py cli ...`, bảng đối chiếu lệnh ở mục 6 của [HUONG_DAN_COMMAND.md](docs/HUONG_DAN_COMMAND.md). Bản `shopee_batch_gsheet.py` (gspread + Service Account) không còn được hỗ trợ. Mã cũ vẫn xem được trong lịch sử git (commit `319d0ad`).
+
+Dữ liệu cũ trong `Shopee/` không được dùng nữa: nạp lại Page bằng `py app.py cli sync-pages TOKEN_DAI_HAN` (hoặc nút "Lấy Page" trong giao diện) và đăng nhập Shopee lại bằng `py app.py cli login-shopee`.
+
 ## Bảo mật
 
-- **Không commit** `pages.json`, `shopee_state.json`, `browser_profile/`, `service_account.json` (đã có trong `.gitignore`).
-- Không chia sẻ Web app URL, `TOKEN` của Apps Script, App Secret và Page token.
-- Dùng `pages.example.json` làm mẫu: copy thành `pages.json` hoặc để `--sync-pages` tự tạo.
-
-## Tài liệu chi tiết
-
-- [Hướng dẫn sử dụng (bản giao diện)](Shopee/HUONG_DAN_SU_DUNG.md)
-- [Hướng dẫn kết nối Google Sheet & Facebook Page](Shopee/HUONG_DAN_KET_NOI.md)
-- [Hướng dẫn dòng lệnh](Shopee/HUONG_DAN_COMMAND.md)
+- **Không commit** thư mục `data/` (đã có trong `.gitignore`); `pre-commit` chặn file lớn và khóa riêng tư.
+- Không chia sẻ Web app URL, token Apps Script, App Secret và Page token.
+- `py app.py cli config show` che sẵn các giá trị bí mật khi cần gửi cấu hình để hỗ trợ.
