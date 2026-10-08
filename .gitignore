@@ -1,0 +1,26 @@
+# Dữ liệu nhạy cảm (token, cookie, phiên đăng nhập) - KHÔNG đưa lên git
+Shopee/pages.json
+Shopee/shopee_state.json
+Shopee/service_account.json
+Shopee/browser_profile/
+.env
+*.env
+
+# Video tải về
+Shopee/videos/
+*.mp4
+*.m3u8
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Khác
+Shopee/py
+*.log
+.vscode/
+.idea/
+Thumbs.db
+Desktop.ini
