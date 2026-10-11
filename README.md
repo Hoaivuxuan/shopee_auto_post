@@ -12,6 +12,80 @@
 - Chế độ: chỉ tải, chỉ đăng, tải rồi đăng, tải và đăng song song; tự chạy lại mỗi N phút; chạy thử (dry-run).
 - Nhật ký tự che token/URL bí mật.
 
+## Luồng hoạt động
+
+### Tổng quan
+
+```mermaid
+flowchart LR
+    U["Người dùng<br/>điền cột A, F-J"] --> GS[("Google Sheet")]
+    GS <-->|"tab_list / tab_update<br/>(token)"| AS["Apps Script Web app"]
+    AS <-->|"HTTP POST JSON"| APP["app.py<br/>GUI hoặc CLI"]
+    APP --> J["jobs.run_all(mode)"]
+    J -->|"download"| DL["run_download"]
+    J -->|"post"| PO["run_post"]
+    DL -->|"Playwright bắt .mp4/.m3u8"| SP["Shopee"]
+    DL --> V[("data/videos/")]
+    V --> PO
+    PO -->|"Graph API"| FB["Facebook Page"]
+```
+
+Các chế độ của `run_all`:
+
+| Chế độ | Luồng |
+|---|---|
+| `download` | Chỉ chạy `run_download` |
+| `post` | Chỉ chạy `run_post` |
+| `download_post` | `run_download` xong rồi mới `run_post` |
+| `parallel` | `run_download` chạy ở luồng riêng, `run_post` lặp lại mỗi 60 giây để đăng các dòng vừa tải xong, cuối cùng chạy `run_post` thêm một lượt |
+
+### Tải video (`run_download`)
+
+```mermaid
+flowchart TD
+    A["Đọc cột A-E từ sheet"] --> B{"Cột A là link http?"}
+    B -->|"Không"| SKIP["Bỏ qua"]
+    B -->|"Có"| C{"Cột B?"}
+    C -->|"Thành công"| SKIP
+    C -->|"Lỗi, không bật --retry"| SKIP
+    C -->|"Trống / Lỗi + --retry"| D["Lấy tối đa shopee.limit dòng"]
+    D --> E["Ghi B = Đang xử lý"]
+    E --> F{"File video đã có trong data/videos?"}
+    F -->|"Có"| OK["B = Thành công, D = đường dẫn file"]
+    F -->|"Không"| G["Mở trang Shopee, bắt link video"]
+    G -->|"Bắt được"| H["Tải file .part rồi đổi tên .mp4"] --> OK
+    G -->|"Không bắt được / lỗi"| ERR["B = Lỗi, E = nguyên nhân"]
+    OK --> N["Nghỉ ngẫu nhiên min_delay-max_delay giây"]
+    ERR --> N
+    N --> E
+```
+
+### Đăng Facebook (`run_post`)
+
+```mermaid
+flowchart TD
+    A["Đọc cột A-N từ sheet"] --> B{"B = Thành công<br/>và F có Page?"}
+    B -->|"Không"| SKIP["Bỏ qua"]
+    B -->|"Có"| C{"Cột K?"}
+    C -->|"Thành công / Đã lên lịch"| SKIP
+    C -->|"Đang xử lý"| WARN["Cảnh báo, không tự đăng lại"]
+    C -->|"Lỗi / Một phần, không bật --retry"| SKIP
+    C -->|"Trống / Lỗi / Một phần + --retry"| D{"Cột J - Giờ đăng"}
+    D -->|"Trống hoặc đã qua"| NOW["Đăng ngay"]
+    D -->|"schedule_mode = facebook<br/>và cách hiện tại 12 phút - 29 ngày"| SCH["Hẹn giờ trên Facebook"]
+    D -->|"Chưa đến giờ"| WAIT["Chờ lượt chạy sau"]
+    NOW --> E["Ghi K = Đang xử lý"]
+    SCH --> E
+    E --> F["Lần lượt từng Page chưa có trong cột M:<br/>upload_video, ghi ID vào M,<br/>bình luận link nếu bật"]
+    F --> G{"Kết quả"}
+    G -->|"Mọi Page OK"| R1["K = Thành công / Đã lên lịch"]
+    G -->|"Một số Page lỗi"| R2["K = Một phần"]
+    G -->|"Không Page nào OK"| R3["K = Lỗi, N = nguyên nhân"]
+    G -->|"Facebook giới hạn tốc độ"| STOP["Dừng cả lượt đăng"]
+```
+
+Cột M lưu ID bài theo từng Page (`Tên Page [PAGE_ID] :: ID_BÀI`), nên khi chạy lại với `--retry` chương trình chỉ đăng nốt các Page còn thiếu, không đăng trùng.
+
 ## Cấu trúc thư mục
 
 ```
