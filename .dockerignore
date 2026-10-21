@@ -1,0 +1,14 @@
+data
+youtube_to_facebook/data
+youtube_to_facebook/admin-ui/node_modules
+**/*cookies.txt
+api_keys.txt
+.venv
+.git
+**/__pycache__
+api_shopee
+tests
+docs
+scripts
+*.md
+shopeetool/admin-ui/node_modules

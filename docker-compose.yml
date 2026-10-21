@@ -1,0 +1,30 @@
+services:
+  admin:
+    build: .
+    image: shopee-admin
+    container_name: shopee-admin
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      OLLAMA_URL: http://127.0.0.1:11434/api/chat
+    volumes:
+      - ./data:/app/data
+      - ./shopeetool/web:/app/shopeetool/web:ro
+
+  dts:
+    build:
+      context: .
+      dockerfile: douyin_to_social_media/Dockerfile
+    image: dts-admin
+    container_name: dts-admin
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      DTS_HOST: 0.0.0.0
+      DTS_PORT: "8766"
+      OLLAMA_URL: http://127.0.0.1:11434/api/generate
+    volumes:
+      - ./data:/app/data
+      # Mount code để admin-ui / AI pipeline luôn khớp host
+      - ./douyin_to_social_media:/app/douyin_to_social_media
+      - ./api_keys.txt:/app/api_keys.txt:ro

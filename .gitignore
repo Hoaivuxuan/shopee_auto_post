@@ -2,6 +2,8 @@
 data/
 .env
 *.env
+*cookies.txt
+api_keys.txt
 
 # Dữ liệu của bản script cũ (thư mục Shopee/)
 Shopee/pages.json

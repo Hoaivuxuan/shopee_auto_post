@@ -1,0 +1,13 @@
+yt-dlp>=2026.8.19
+translators
+deep-translator
+numpy>=1.26
+faster-whisper>=1.1.0
+edge-tts>=6.1.0
+piper-tts
+huggingface_hub
+requests
+google-api-python-client>=2.100.0
+google-auth-oauthlib>=1.2.0
+google-auth-httplib2>=0.2.0
+numpy>=1.26
