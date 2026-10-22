@@ -147,11 +147,12 @@ def _status_of(video: dict, posts: dict) -> str:
     return "pending"
 
 
-def queue(videos: list[dict], posts: dict, order: str) -> list[dict]:
+def queue(videos: list[dict], posts: dict, order: str, ai_ids: set[str] | None = None) -> list[dict]:
+    ready = ai_ids if ai_ids is not None else fb._ai_short_ids()
     pending = [
         video
         for video in videos
-        if _status_of(video, posts) == "pending" and fb.ai_short_path(video["id"])
+        if _status_of(video, posts) == "pending" and video["id"] in ready
     ]
     pending.sort(key=lambda video: (video.get("upload_date") or "", video["id"]))
     if order == "newest":
@@ -172,48 +173,44 @@ def _public_video(video: dict, posts: dict) -> dict:
             message=live.get("message") or "", current_step=live.get("current_step") or "",
             steps=live.get("steps") if isinstance(live.get("steps"), dict) else {},
         )
-    elif isinstance(record.get("progress"), dict):
-        pub = dict(record["progress"])
-        if status == "published":
-            pub["status"] = "done"
-            pub["permalink"] = record.get("permalink") or pub.get("permalink") or ""
-        if status == "error":
-            pub["status"] = "error"
-            pub["error"] = record.get("error") or pub.get("error") or ""
     elif status == "published":
-        pub = progress.progress_payload(
-            kind="publish", target="youtube", status="done", message="Đã đăng thành công",
-            permalink=record.get("permalink") or "", remote_id=record.get("youtube_video_id") or "",
-            finished_at=record.get("posted_at") or "",
-            steps={k: {"status": "done", "label": lab} for k, lab in progress.defs_for("publish", "youtube")},
-        )
+        pub = {"status": "done"}
     elif status == "error":
-        pub = progress.progress_payload(
-            kind="publish", target="youtube", status="error",
-            message=record.get("error") or "Lỗi đăng", error=record.get("error") or "",
-        )
+        pub = {"status": "error", "error": record.get("error") or "Lỗi đăng"}
+    elif isinstance(record.get("progress"), dict) and record["progress"].get("status") == "running":
+        pub = dict(record["progress"])
     else:
-        pub = progress.progress_payload(kind="publish", target="youtube", status="idle")
+        pub = {"status": "idle"}
 
-    row = fb._public_video(video, {"items": {}})  # base fields, ignore FB posts
+    ai_ids = getattr(_public_video, "_ai_ids", None)
+    row = fb._public_video(video, {"items": {}}, ai_ids)  # base fields, ignore FB posts
     yt_copy = douyin_translate.youtube_copy(video, saved)
+    caption_vi = yt_copy.get("caption_vi") or str(saved.get("caption_vi") or "")
     row.update({
         "caption": fb._caption(video),
-        "caption_vi": yt_copy.get("caption_vi") or str(saved.get("caption_vi") or ""),
-        "title_vi": yt_copy.get("title_vi") or "",
-        "description_vi": yt_copy.get("description_vi") or "",
-        "translated": bool(str(saved.get("caption_vi") or yt_copy.get("title_vi") or "").strip()),
-        "translation_engine": str(saved.get("engine") or ""),
-        "has_ai_short": bool(fb.ai_short_path(video["id"])),
+        "caption_vi": caption_vi,
+        "translated": bool(str(caption_vi or yt_copy.get("title_vi") or "").strip()),
+        "has_ai_short": bool(ai_ids and video["id"] in ai_ids) if ai_ids is not None else bool(fb.ai_short_path(video["id"])),
         "status": status,
-        "facebook_video_id": "",
-        "youtube_video_id": record.get("youtube_video_id") or "",
         "permalink": record.get("permalink") or "",
         "error": record.get("error") or "",
         "posted_at": record.get("posted_at") or "",
         "target": "youtube",
         "publish": pub,
     })
+    title_vi = yt_copy.get("title_vi") or ""
+    description_vi = yt_copy.get("description_vi") or ""
+    if title_vi:
+        row["title_vi"] = title_vi
+    if description_vi:
+        row["description_vi"] = description_vi
+    engine = str(saved.get("engine") or "")
+    if engine:
+        row["translation_engine"] = engine
+    yt_id = record.get("youtube_video_id") or ""
+    if yt_id:
+        row["youtube_video_id"] = yt_id
+    row.pop("facebook_video_id", None)
     return row
 
 
@@ -234,12 +231,14 @@ def public_state() -> dict:
     with _LOCK:
         cfg = load_config()
         posts = load_posts()
-        videos = fb.load_videos()
+        job = dict(_JOB)
+        auto = dict(cfg["auto"])
+    videos = fb.load_videos()
+    ai_ids = fb._ai_short_ids()
+    _public_video._ai_ids = ai_ids  # type: ignore[attr-defined]
+    try:
         listed = [_public_video(video, posts) for video in videos]
-        pending = queue(videos, posts, cfg["auto"]["order"])
-        counts = {"total": len(listed), "pending": 0, "published": 0, "error": 0, "missing": 0, "posting": 0}
-        for item in listed:
-            counts[item["status"]] = counts.get(item["status"], 0) + 1
+        pending = queue(videos, posts, auto["order"], ai_ids)
         nxt = pending[0] if pending else None
         next_row = None
         if nxt:
@@ -248,42 +247,47 @@ def public_state() -> dict:
                 "id": nxt["id"],
                 "title": (shown.get("caption") or nxt["title"] or "").splitlines()[0][:160],
             }
-        auth = yt.auth_status(TOKEN_PATH, secrets_path(cfg))
-        if auth.get("channel_title") and auth["channel_title"] != cfg.get("channel_title"):
-            cfg["channel_title"] = auth["channel_title"]
-            cfg["channel_id"] = auth.get("channel_id") or cfg.get("channel_id") or ""
-            save_config(cfg)
-        return {
-            "ok": True,
-            "source": "douyin",
-            "target": "youtube",
-            "page": {
-                "id": cfg.get("channel_id") or auth.get("channel_id") or "",
-                "name": cfg.get("channel_title") or auth.get("channel_title") or "YouTube",
-                "url": (
-                    f"https://www.youtube.com/channel/{cfg['channel_id']}"
-                    if cfg.get("channel_id")
-                    else "https://www.youtube.com"
-                ),
-                "has_token": bool(auth.get("has_auth")),
-            },
-            "youtube": {
-                **auth,
-                "privacy_status": cfg.get("privacy_status") or "public",
-                "category_id": cfg.get("category_id") or "22",
-                "auth_job": dict(_AUTH_JOB),
-            },
-            "auto": {
-                **cfg["auto"],
-                "next_at": _next_at(posts, cfg["auto"]),
-                "last_posted_at": posts.get("last_posted_at") or "",
-            },
-            "job": dict(_JOB),
-            "counts": counts,
-            "next": next_row,
-            "log": posts.get("log") or [],
-            "videos": listed,
-        }
+    finally:
+        _public_video._ai_ids = None  # type: ignore[attr-defined]
+    counts = {"total": len(listed), "pending": 0, "published": 0, "error": 0, "missing": 0, "posting": 0}
+    for item in listed:
+        counts[item["status"]] = counts.get(item["status"], 0) + 1
+    auth = yt.auth_status(TOKEN_PATH, secrets_path(cfg))
+    if auth.get("channel_title") and auth["channel_title"] != cfg.get("channel_title"):
+        cfg["channel_title"] = auth["channel_title"]
+        cfg["channel_id"] = auth.get("channel_id") or cfg.get("channel_id") or ""
+        save_config(cfg)
+    return {
+        "ok": True,
+        "source": "douyin",
+        "target": "youtube",
+        "page": {
+            "id": cfg.get("channel_id") or auth.get("channel_id") or "",
+            "name": cfg.get("channel_title") or auth.get("channel_title") or "YouTube",
+            "url": (
+                f"https://www.youtube.com/channel/{cfg['channel_id']}"
+                if cfg.get("channel_id")
+                else "https://www.youtube.com"
+            ),
+            "has_token": bool(auth.get("has_auth")),
+        },
+        "youtube": {
+            **auth,
+            "privacy_status": cfg.get("privacy_status") or "public",
+            "category_id": cfg.get("category_id") or "22",
+            "auth_job": dict(_AUTH_JOB),
+        },
+        "auto": {
+            **auto,
+            "next_at": _next_at(posts, auto),
+            "last_posted_at": posts.get("last_posted_at") or "",
+        },
+        "job": job,
+        "counts": counts,
+        "next": next_row,
+        "log": posts.get("log") or [],
+        "videos": listed,
+    }
 
 
 def update_settings(payload: dict) -> dict:

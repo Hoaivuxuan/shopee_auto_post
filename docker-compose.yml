@@ -7,9 +7,12 @@ services:
     network_mode: host
     environment:
       OLLAMA_URL: http://127.0.0.1:11434/api/chat
+      # Mật khẩu admin lần đầu (bỏ trống = admin123). Đổi ngay sau khi đăng nhập.
+      SHOPEE_ADMIN_PASSWORD: ${SHOPEE_ADMIN_PASSWORD:-}
     volumes:
       - ./data:/app/data
       - ./shopeetool/web:/app/shopeetool/web:ro
+      - ./api_shopee:/app/api_shopee:ro
 
   dts:
     build:

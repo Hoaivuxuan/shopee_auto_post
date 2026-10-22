@@ -16,6 +16,8 @@ VN_TZ = timezone(timedelta(hours=7))
 _CJK = re.compile(r"[\u4e00-\u9fff]")
 _TAG = re.compile(r"#([^\s#]+)")
 _LOCK = threading.RLock()
+# Cache translations.json trong RAM — tránh đọc/parse lại cho từng video khi load state.
+_MEM: dict = {"mtime": None, "data": {}}
 
 # Hashtag cố định cho mô tả YouTube Shorts (không lấy tag dịch từ Douyin).
 YOUTUBE_FIXED_TAGS = "#shortviral #kienthucthuvi #khampha #vuive"
@@ -180,11 +182,23 @@ def compose_caption(title: str, description: str) -> tuple[str, str]:
 def _read() -> dict:
     path = _cache_path()
     try:
+        mtime = path.stat().st_mtime_ns
+    except OSError:
+        _MEM["mtime"] = None
+        _MEM["data"] = {}
+        return {}
+    if _MEM.get("mtime") == mtime and isinstance(_MEM.get("data"), dict):
+        return _MEM["data"]
+    try:
         import json
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        return {}
-    return data if isinstance(data, dict) else {}
+        data = {}
+    if not isinstance(data, dict):
+        data = {}
+    _MEM["mtime"] = mtime
+    _MEM["data"] = data
+    return data
 
 
 def _write(data: dict) -> None:
@@ -195,6 +209,11 @@ def _write(data: dict) -> None:
     tmp = path.with_suffix(path.suffix + ".tmp")
     tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     tmp.replace(path)
+    try:
+        _MEM["mtime"] = path.stat().st_mtime_ns
+    except OSError:
+        _MEM["mtime"] = None
+    _MEM["data"] = data if isinstance(data, dict) else {}
 
 
 def lookup(video_id: str) -> dict:

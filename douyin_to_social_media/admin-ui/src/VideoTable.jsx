@@ -1,10 +1,12 @@
 import { useState } from "react";
 import { IconButton, Icons } from "./icons.jsx";
-import { STATUS, hasOffer } from "./status.js";
+import { STATUS, hasAiShort, hasOffer } from "./status.js";
 
-function matches(video, filter, offer, channel, query) {
+function matches(video, filter, offer, ai, channel, query) {
   if (filter !== "all" && video.status !== filter) return false;
   if (offer === "yes" && !hasOffer(video)) return false;
+  if (ai === "yes" && !hasAiShort(video)) return false;
+  if (ai === "no" && hasAiShort(video)) return false;
   if (channel !== "all" && video.channel !== channel) return false;
   if (!query) return true;
   const blob = `${video.caption || ""} ${video.title || ""} ${video.description || ""} ${video.channel_name || ""} ${video.id || ""}`.toLowerCase();
@@ -37,10 +39,13 @@ function compareRows(left, right, key, dir) {
   return base * (dir === "asc" ? 1 : -1);
 }
 
+const AI_LABEL = { yes: "đã có video ngắn", no: "chưa có video ngắn" };
+
 export default function VideoTable({
   videos,
   filter,
   offer,
+  ai = "all",
   channel,
   channels,
   query,
@@ -57,9 +62,11 @@ export default function VideoTable({
   postLabel = "Đăng",
 }) {
   const [sort, setSort] = useState({ key: "", dir: "asc" });
+  const [limit, setLimit] = useState(80);
   const q = query.trim().toLowerCase();
-  const rows = (videos || []).filter((video) => matches(video, filter, offer, channel, q));
+  const rows = (videos || []).filter((video) => matches(video, filter, offer, ai, channel, q));
   if (sort.key) rows.sort((left, right) => compareRows(left, right, sort.key, sort.dir));
+  const visible = rows.slice(0, limit);
 
   function toggleSort(key) {
     setSort((current) => {
@@ -78,6 +85,7 @@ export default function VideoTable({
         <span className="meta">
           {rows.length} video · {STATUS_LABEL[filter] || filter} · {channelName}
           {offer === "yes" ? " · đã có gợi ý" : ""}
+          {AI_LABEL[ai] ? ` · ${AI_LABEL[ai]}` : ""}
         </span>
       </div>
       <table>
@@ -94,7 +102,7 @@ export default function VideoTable({
           </tr>
         </thead>
         <tbody>
-          {rows.length ? rows.map((video) => {
+          {visible.length ? visible.map((video) => {
             const [kind, label] = STATUS[video.status] || STATUS.pending;
             const hasAi = video.source !== "douyin" || Boolean(video.has_ai_short || video.ai?.has_ai);
             const canPost = hasAi && video.status !== "posting" && video.status !== "missing";
@@ -103,7 +111,7 @@ export default function VideoTable({
             return (
               <tr key={video.id} className={video.id === activeId ? "active" : ""}>
                 <td className="title">
-                  <div className="desc">{(video.caption || video.title || "").split("\n").find(Boolean)}</div>
+                  <div className="desc">{(video.caption_vi || video.caption || video.title || "").split("\n").find(Boolean)}</div>
                   {showOrigin && video.translated ? <div className="meta">Gốc: {video.title}</div> : null}
                   {showOrigin && !video.translated ? <div className="meta">Chưa dịch sang tiếng Việt</div> : null}
                   {video.offers?.length ? (
@@ -181,6 +189,13 @@ export default function VideoTable({
           )}
         </tbody>
       </table>
+      {rows.length > visible.length ? (
+        <div className="board-foot">
+          <button type="button" className="ghost" onClick={() => setLimit((n) => n + 100)}>
+            Xem thêm {Math.min(100, rows.length - visible.length)} / còn {rows.length - visible.length}
+          </button>
+        </div>
+      ) : null}
     </section>
   );
 }

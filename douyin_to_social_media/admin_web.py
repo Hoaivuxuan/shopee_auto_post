@@ -7,9 +7,12 @@ Mở:    http://127.0.0.1:8766 hoặc http://<ip-máy>:8766
 
 from __future__ import annotations
 
+import gzip
 import json
 import os
 import sys
+import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
@@ -45,6 +48,27 @@ _STATIC_TYPES = {
     ".ico": "image/x-icon",
     ".map": "application/json",
 }
+# Cache state ngắn — poll UI 4–10s tái sử dụng kết quả vừa build.
+_STATE_TTL = 0.9
+_STATE_CACHE: dict[str, tuple[float, dict]] = {}
+_STATE_LOCK = threading.Lock()
+
+
+def _invalidate_state_cache() -> None:
+    with _STATE_LOCK:
+        _STATE_CACHE.clear()
+
+
+def _state_for(target: str) -> dict:
+    now = time.monotonic()
+    with _STATE_LOCK:
+        hit = _STATE_CACHE.get(target)
+        if hit and now - hit[0] < _STATE_TTL:
+            return hit[1]
+    payload = _decorate_douyin(_poster(target).public_state())
+    with _STATE_LOCK:
+        _STATE_CACHE[target] = (time.monotonic(), payload)
+    return payload
 
 
 def _web_file(url_path: str) -> Path | None:
@@ -134,15 +158,21 @@ class Handler(BaseHTTPRequestHandler):
 
     def _send(self, code: int, body, content_type: str) -> None:
         data = body if isinstance(body, bytes) else body.encode("utf-8")
+        encode = "gzip" in (self.headers.get("Accept-Encoding") or "") and len(data) > 2048
+        if encode:
+            data = gzip.compress(data, compresslevel=4)
         self.send_response(code)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(data)))
         self.send_header("Cache-Control", "no-store")
+        if encode:
+            self.send_header("Content-Encoding", "gzip")
+            self.send_header("Vary", "Accept-Encoding")
         self.end_headers()
         self.wfile.write(data)
 
     def _json(self, code: int, payload: dict) -> None:
-        self._send(code, json.dumps(payload, ensure_ascii=False), "application/json; charset=utf-8")
+        self._send(code, json.dumps(payload, ensure_ascii=False, separators=(",", ":")), "application/json; charset=utf-8")
 
     def _read_json(self) -> dict:
         length = int(self.headers.get("Content-Length") or 0)
@@ -169,7 +199,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path == "/api/douyin/state":
             target = _target_of((query.get("target") or ["facebook"])[0])
-            self._json(200, _decorate_douyin(_poster(target).public_state()))
+            self._json(200, _state_for(target))
             return
         if path.startswith("/api/douyin/media/"):
             video_id = path.removeprefix("/api/douyin/media/").split("/", 1)[0]
@@ -205,6 +235,7 @@ class Handler(BaseHTTPRequestHandler):
         try:
             target = _target_of(body.get("target"))
             poster = _poster(target)
+            _invalidate_state_cache()
 
             if path == "/api/douyin/settings":
                 self._json(200, _decorate_douyin(poster.update_settings(body)))

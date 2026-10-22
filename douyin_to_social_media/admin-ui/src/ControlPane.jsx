@@ -1,16 +1,19 @@
-import { FILTERS, OFFER_FILTERS, hasOffer } from "./status.js";
+import { AI_FILTERS, FILTERS, OFFER_FILTERS, hasAiShort, hasOffer } from "./status.js";
 
 export default function ControlPane({
   state,
   filter,
   offer,
+  ai = "all",
   channel,
   query,
   onFilter,
   onOffer,
+  onAi,
   onChannel,
   onQuery,
   showOffer = true,
+  showAi = false,
   channelHeading = "Lọc theo kênh",
   allChannelsLabel = "Tất cả kênh",
 }) {
@@ -32,6 +35,12 @@ export default function ControlPane({
     all: videos.length,
     yes: videos.filter(hasOffer).length,
   };
+  const withAi = videos.filter(hasAiShort).length;
+  const aiCounts = {
+    all: videos.length,
+    yes: withAi,
+    no: videos.length - withAi,
+  };
 
   return (
     <aside className="side">
@@ -45,6 +54,19 @@ export default function ControlPane({
             </button>
           ))}
         </div>
+        {showAi ? (
+          <>
+            <strong>Lọc video ngắn</strong>
+            <div className="choice-list" role="group" aria-label="Lọc video ngắn">
+              {AI_FILTERS.map(([id, label]) => (
+                <button key={id} type="button" className={ai === id ? "on" : ""} onClick={() => onAi?.(id)}>
+                  <span>{label}</span>
+                  <span className="count">{aiCounts[id] ?? 0}</span>
+                </button>
+              ))}
+            </div>
+          </>
+        ) : null}
         {showOffer ? (
           <>
             <strong>Lọc gợi ý Shopee</strong>

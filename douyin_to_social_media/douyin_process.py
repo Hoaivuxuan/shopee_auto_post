@@ -161,7 +161,7 @@ def process_video(
 
         _go("voice", "TTS lồng tiếng")
         resolved = douyin_voice._resolve_provider(provider)
-        # Mặc định luôn nam miền Bắc: Piper speaker 2 / FPT leminh
+        # Mặc định luôn nam miền Bắc: Piper speaker 2 / FPT leminh / Edge NamMinh
         if voice and str(voice).strip():
             tts_voice = str(voice).strip()
         elif resolved == "piper":
@@ -170,11 +170,12 @@ def process_video(
             tts_voice = douyin_voice.DEFAULT_FPT_VOICE
         else:
             tts_voice = douyin_voice.DEFAULT_EDGE_VOICE
+        # Giữ "auto" để synthesize_voice cascade FPT→Piper→Edge khi 429 (đừng khóa sẵn "fpt")
         voice_meta = douyin_voice.synthesize_voice(
             script,
             voice=tts_voice,
             pitch=pitch,
-            provider=resolved if provider == "auto" else provider,
+            provider=provider,
             force=force,
         )
         _ok("voice", {

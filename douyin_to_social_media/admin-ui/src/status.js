@@ -18,6 +18,16 @@ export const OFFER_FILTERS = [
   ["yes", "Đã có gợi ý"],
 ];
 
+export const AI_FILTERS = [
+  ["all", "Tất cả"],
+  ["yes", "Đã có video ngắn"],
+  ["no", "Chưa có video ngắn"],
+];
+
 export function hasOffer(video) {
   return Array.isArray(video?.offers) && video.offers.length > 0;
+}
+
+export function hasAiShort(video) {
+  return Boolean(video?.has_ai_short || video?.ai?.has_ai);
 }

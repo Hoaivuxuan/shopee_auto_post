@@ -23,13 +23,25 @@ BEATS = [
     {"beat": 7, "name": "cta", "frac": 0.07, "role": "Kết + CTA — ẩn dụ cảm xúc"},
 ]
 
-# Vị trí tương đối trên video NGUỒN để lấy cảnh cho từng beat
+# Vị trí tương đối trên video NGUỒN theo beat.
+# Video thủ công dài (Lý Tử Thất…) thường 30–50% đầu = cánh đồng/không khí —
+# lệch cửa sổ về nửa SAU để bắt thao tác nghề; hook lấy thành phẩm gần cuối.
 SOURCE_WINDOWS = [
-    (0.00, 0.10),
-    (0.08, 0.22),
-    (0.20, 0.38),
-    (0.35, 0.50),
-    (0.48, 0.75),
+    (0.90, 0.99),  # hook — cận cảnh thành phẩm / cắt bánh
+    (0.52, 0.62),  # prep — rửa/chọn liệu (sau intro đồng)
+    (0.60, 0.72),  # transform
+    (0.68, 0.78),  # bridge
+    (0.75, 0.90),  # core — thao tác chính
+    (0.88, 0.96),  # meaning
+    (0.94, 1.00),  # cta
+]
+# Video ngắn (< ~3 phút): phân bố đều hơn, hook có thể ở đầu
+SOURCE_WINDOWS_SHORT = [
+    (0.00, 0.12),
+    (0.10, 0.28),
+    (0.25, 0.45),
+    (0.40, 0.55),
+    (0.50, 0.75),
     (0.72, 0.92),
     (0.88, 1.00),
 ]
@@ -44,6 +56,33 @@ def _write_json(path: Path, payload) -> None:
 
 def _duration_of(segments: list[dict]) -> float:
     return sum(max(0.0, float(s["end"]) - float(s["start"])) for s in segments)
+
+
+def _asr_coverage(segments: list[dict], duration: float) -> float:
+    """Tỷ lệ thời lượng có lời ASR / độ dài video (0–1)."""
+    duration = float(duration or 0)
+    if duration <= 1:
+        return 0.0
+    covered = _duration_of(segments)
+    return max(0.0, min(1.0, covered / duration))
+
+
+def _source_windows_for(duration: float) -> list[tuple[float, float]]:
+    """Video dài → lệch nửa sau (tránh intro lan man)."""
+    if float(duration or 0) >= 200:
+        return list(SOURCE_WINDOWS)
+    return list(SOURCE_WINDOWS_SHORT)
+
+
+def _is_front_loaded(clips: list[dict], duration: float) -> bool:
+    """True nếu toàn bộ clip nằm trong ~55% đầu của video dài — thường là intro cánh đồng."""
+    duration = float(duration or 0)
+    if duration < 200 or not clips:
+        return False
+    span_end = max(float(c.get("end") or 0) for c in clips)
+    span_start = min(float(c.get("start") or 0) for c in clips)
+    # Liền mạch từ đầu và không chạm nửa sau
+    return span_start < duration * 0.08 and span_end < duration * 0.58
 
 
 def _beat_budgets(target: float) -> list[dict]:
@@ -65,23 +104,24 @@ def _heuristic_pick(
     duration: float = 0.0,
     topic_vi: str = "",
 ) -> list[dict]:
-    """7 cửa sổ theo vị trí nguồn + ngân sách beat."""
+    """7 cửa sổ theo vị trí nguồn + ngân sách beat (giữ thứ tự beat, không sort theo start)."""
     duration = float(duration or 0)
     if duration <= 0 and segments:
         duration = float(segments[-1]["end"])
     if duration <= 0:
         return []
+    windows = _source_windows_for(duration)
     budgets = _beat_budgets(min(target, max_seconds))
     picked = []
     total = 0.0
     for i, budget in enumerate(budgets):
-        lo, hi = SOURCE_WINDOWS[i]
+        lo, hi = windows[i]
         want = float(budget["seconds"])
         if total + want > max_seconds:
             want = max(5.0, max_seconds - total)
         center = (lo + hi) / 2.0 * duration
         start = max(0.0, center - want / 2.0)
-        # neo gần đầu cửa sổ nguồn
+        # neo trong cửa sổ nguồn
         start = max(lo * duration, min(start, max(0.0, hi * duration - want)))
         end = min(duration, start + want)
         if end - start < 4:
@@ -170,8 +210,14 @@ def _normalize_clips(
             }
         )
     clips = _merge_adjacent(clips)
-    # Giữ thứ tự thời gian (câu chuyện); cắt bớt beat giữa nếu vượt max
-    ordered = sorted(clips, key=lambda c: float(c["start"]))
+    # Giữ thứ tự BEAT (hook có thể lấy từ cuối nguồn); không sort thuần theo start
+    ordered = sorted(
+        clips,
+        key=lambda c: (
+            int(c["beat"]) if c.get("beat") else 99,
+            float(c["start"]),
+        ),
+    )
     total = sum(float(c["end"]) - float(c["start"]) for c in ordered)
     if total <= max_seconds:
         return ordered
@@ -240,6 +286,12 @@ def _prompt(
     beat_lines = "\n".join(
         f"  - beat {b['beat']} ({b['name']}): ~{b['seconds']}s — {b['role']}" for b in budgets
     )
+    windows = _source_windows_for(duration)
+    window_hint = "\n".join(
+        f"  - beat {i + 1}: ưu tiên nguồn ~{int(lo * 100)}–{int(hi * 100)}% "
+        f"(≈{lo * duration:.0f}–{hi * duration:.0f}s)"
+        for i, (lo, hi) in enumerate(windows)
+    )
     return (
         "Bạn là biên tập Shorts thuyết minh di sản/thủ công (kiểu BIẾT HAY CHƯA).\n"
         "CHỦ ĐỀ ĐÚNG (ưu tiên tuyệt đối):\n"
@@ -247,10 +299,16 @@ def _prompt(
         f"- topic_zh: {topic_zh or title_zh or '(trống)'}\n"
         f"- title_zh: {title_zh or '(trống)'}\n"
         f"- video_duration_sec: {duration}\n\n"
-        "LƯU Ý:\n"
-        "- ASR có thể ẢO GIÁC — chỉ dùng làm mốc thời gian, không copy nghĩa đen.\n"
-        "- Chọn cảnh theo CHUỖI QUY TRÌNH nghề, không nhảy lung tung theo score.\n"
-        "- summary_vi phải khớp topic_vi.\n\n"
+        "LƯU Ý BẮT BUỘC:\n"
+        "- ASR có thể ẢO GIÁC / thiếu — chỉ tham chiếu thời gian, không copy nghĩa đen.\n"
+        "- Video dài kiểu thủ công thường 30–50% ĐẦU là cánh đồng / không khí / đi hái.\n"
+        "  CẤM lấy gần hết short từ nửa đầu nguồn; CẤM 7 clip liền mạch từ giây 0.\n"
+        "- Beat prep→core phải là THAO TÁC NGHỀ (rửa liệu, nghiền, trộn, hấp, cắt bánh…),\n"
+        "  không phải đứng vườn / gánh rơm / cảnh quan.\n"
+        "- Beat hook: cận cảnh thành phẩm hoặc thao tác lõi (được lấy gần CUỐI nguồn).\n"
+        "- Chọn theo CHUỖI QUY TRÌNH nghề; summary_vi khớp topic_vi.\n"
+        "- Gợi ý cửa sổ nguồn (có thể lệch nhẹ nếu thấy cảnh nghề rõ hơn):\n"
+        f"{window_hint}\n\n"
         f"Chọn ĐÚNG 7 đoạn (một đoạn / beat), tổng gần {int(target)}s "
         f"(tối thiểu {int(target * 0.75)}s), không vượt {int(max_seconds)}s.\n"
         "Ngân sách từng beat:\n"
@@ -259,7 +317,8 @@ def _prompt(
         '{"clips":[{"beat":1,"beat_name":"hook","start":0.0,"end":12.0,"score":0-100,'
         '"reason":"...","text":"mô tả cảnh theo chủ đề"}],'
         '"summary_zh":"...","summary_vi":"..."}\n'
-        "start/end trong [0, video_duration_sec], clips sắp theo thời gian tăng dần.\n"
+        "start/end trong [0, video_duration_sec]; sắp clips theo thứ tự beat 1→7 "
+        "(không bắt buộc start tăng dần).\n"
         f"Transcript (tham chiếu thời gian, có thể nhiễu):\n"
         f"{json.dumps(compact, ensure_ascii=False)}"
     )
@@ -315,33 +374,13 @@ def select_highlights(
             }
         ]
     else:
+        coverage = _asr_coverage(segments, duration)
+        sparse_asr = coverage < 0.25
         try:
             import douyin_quality
 
-            result = douyin_llm.chat_json(
-                _prompt(
-                    transcript,
-                    target=target_seconds,
-                    max_seconds=max_seconds,
-                    topic_vi=topic_vi,
-                    topic_zh=topic_zh,
-                    title_zh=title_zh,
-                ),
-                temperature=douyin_quality.HIGHLIGHT_TEMPERATURE,
-            )
-            provider = result["provider"]
-            model = result["model"]
-            errors = list(result.get("errors") or [])
-            summary_zh = str(result["data"].get("summary_zh") or "")
-            summary_vi = str(result["data"].get("summary_vi") or "")
-            clips = _normalize_clips(
-                result["data"].get("clips") or [],
-                segments,
-                max_seconds=max_seconds,
-                target_seconds=target_seconds,
-            )
-            total_picked = sum(float(c["end"]) - float(c["start"]) for c in clips)
-            if (not clips) or total_picked < target_seconds * 0.55 or len(clips) < 4:
+            # ASR quá nghèo → heuristic lệch nửa sau (tránh LLM bịa quy trình trên intro)
+            if sparse_asr and duration >= 200:
                 clips = _heuristic_pick(
                     segments,
                     target=target_seconds,
@@ -349,7 +388,52 @@ def select_highlights(
                     duration=duration,
                     topic_vi=topic_vi,
                 )
-                provider = f"{provider}+heuristic"
+                provider = "heuristic"
+                model = ""
+                errors.append(
+                    f"asr_coverage={coverage:.2f} sparse → heuristic process-bias windows"
+                )
+            else:
+                result = douyin_llm.chat_json(
+                    _prompt(
+                        transcript,
+                        target=target_seconds,
+                        max_seconds=max_seconds,
+                        topic_vi=topic_vi,
+                        topic_zh=topic_zh,
+                        title_zh=title_zh,
+                    ),
+                    temperature=douyin_quality.HIGHLIGHT_TEMPERATURE,
+                )
+                provider = result["provider"]
+                model = result["model"]
+                errors = list(result.get("errors") or [])
+                summary_zh = str(result["data"].get("summary_zh") or "")
+                summary_vi = str(result["data"].get("summary_vi") or "")
+                clips = _normalize_clips(
+                    result["data"].get("clips") or [],
+                    segments,
+                    max_seconds=max_seconds,
+                    target_seconds=target_seconds,
+                )
+                total_picked = sum(float(c["end"]) - float(c["start"]) for c in clips)
+                bad = (
+                    (not clips)
+                    or total_picked < target_seconds * 0.55
+                    or len(clips) < 4
+                    or _is_front_loaded(clips, duration)
+                )
+                if bad:
+                    reason = "front_loaded" if _is_front_loaded(clips, duration) else "thin"
+                    clips = _heuristic_pick(
+                        segments,
+                        target=target_seconds,
+                        max_seconds=max_seconds,
+                        duration=duration,
+                        topic_vi=topic_vi,
+                    )
+                    provider = f"{provider}+heuristic"
+                    errors.append(f"llm_clips_{reason} → heuristic process-bias")
         except Exception as exc:  # noqa: BLE001
             errors.append(str(exc)[:300])
             clips = _heuristic_pick(

@@ -4,6 +4,12 @@ data/
 *.env
 *cookies.txt
 api_keys.txt
+# Curl mẫu Shopee thường kèm cookie phiên — giữ local, mount qua docker-compose
+api_shopee/
+
+# Frontend
+node_modules/
+**/admin-ui/node_modules/
 
 # Dữ liệu của bản script cũ (thư mục Shopee/)
 Shopee/pages.json

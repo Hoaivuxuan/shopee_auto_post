@@ -15,6 +15,7 @@ export default function App() {
   const [state, setState] = useState(null);
   const [toast, setToast] = useState("");
   const [filter, setFilter] = useState("all");
+  const [aiFilter, setAiFilter] = useState("all");
   const [channel, setChannel] = useState("all");
   const [query, setQuery] = useState("");
   const [token, setToken] = useState("");
@@ -31,6 +32,7 @@ export default function App() {
     setTarget(value);
     window.localStorage.setItem("dts-target", value);
     setFilter("all");
+    setAiFilter("all");
     setChannel("all");
     setQuery("");
     setToken("");
@@ -66,12 +68,13 @@ export default function App() {
 
   useEffect(() => {
     refresh().catch((err) => notify(err.message));
-    const busy = Boolean(state?.ai_job?.running || state?.job?.running);
+    const busy = Boolean(state?.ai_job?.running || state?.job?.running || state?.translate?.running || state?.sync?.running);
+    // Idle: poll chậm hơn (payload ~900 video). Busy: poll nhanh để hiện tiến trình.
     const timer = window.setInterval(() => {
       refresh().catch(() => {});
-    }, busy ? 1500 : 4000);
+    }, busy ? 2000 : 10000);
     return () => window.clearInterval(timer);
-  }, [refresh, notify, target, state?.ai_job?.running, state?.job?.running]);
+  }, [refresh, notify, target, state?.ai_job?.running, state?.job?.running, state?.translate?.running, state?.sync?.running]);
 
   async function saveToken() {
     if (!token.trim()) return;
@@ -403,13 +406,16 @@ export default function App() {
             state={state}
             filter={filter}
             offer="all"
+            ai={aiFilter}
             channel={channel}
             query={query}
             onFilter={setFilter}
             onOffer={() => {}}
+            onAi={setAiFilter}
             onChannel={setChannel}
             onQuery={setQuery}
             showOffer={false}
+            showAi
             channelHeading="Lọc theo tài khoản"
             allChannelsLabel="Tất cả tài khoản"
           />
@@ -417,6 +423,7 @@ export default function App() {
             videos={state?.videos}
             filter={filter}
             offer="all"
+            ai={aiFilter}
             channel={channel}
             channels={state?.sync?.channels}
             query={query}

@@ -152,12 +152,23 @@ def status_for(video_id: str) -> dict:
 def enrich_videos(videos: list[dict]) -> list[dict]:
     with _LOCK:
         live = dict(_JOB)
+    # Chỉ video đã có thư mục processed mới cần đọc meta — tránh 900+ stat thừa.
+    try:
+        processed_ids = {p.name for p in PROCESSED.iterdir() if p.is_dir()} if PROCESSED.is_dir() else set()
+    except OSError:
+        processed_ids = set()
+    # Payload gọn: idle/done không gửi steps/step_defs (tiết kiệm ~1MB JSON).
+    idle = {"status": "idle", "has_ai": False}
     for item in videos or []:
         if not isinstance(item, dict):
             continue
         vid = str(item.get("id") or "")
-        info = status_for(vid)
-        if live.get("running") and live.get("video_id") == vid:
+        running_here = live.get("running") and live.get("video_id") == vid
+        if vid not in processed_ids and not running_here:
+            item["ai"] = dict(idle)
+            continue
+        if running_here:
+            info = status_for(vid)
             meta = read_meta(vid)
             info["status"] = "running"
             info["message"] = meta.get("message") or live.get("message") or info["message"]
@@ -168,7 +179,22 @@ def enrich_videos(videos: list[dict]) -> list[dict]:
                 current_step=info["current_step"],
                 overall="running",
             )
-        item["ai"] = info
+            item["ai"] = info
+            continue
+        out = ai_output_path(vid)
+        meta = read_meta(vid)
+        if meta.get("status") == "error":
+            item["ai"] = {
+                "status": "error",
+                "has_ai": bool(out),
+                "message": meta.get("message") or "Lỗi tạo video ngắn",
+                "error": meta.get("message") or "",
+            }
+            continue
+        if out:
+            item["ai"] = {"status": "done", "has_ai": True}
+            continue
+        item["ai"] = dict(idle)
     return videos
 
 

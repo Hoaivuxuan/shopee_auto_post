@@ -28,7 +28,7 @@ def hint_for(e):
     if c in FATAL_CODES:
         return "Facebook đang giới hạn tốc độ hoặc chặn tạm thời: dừng và thử lại sau vài giờ, nên tăng thời gian nghỉ giữa các bài."
     if c == 100:
-        return "Facebook báo tham số không hợp lệ (video không đúng định dạng/quá giới hạn hoặc Page ID sai)."
+        return "Facebook từ chối đăng video. Cần token của Page, không phải token tài khoản cá nhân."
     return ""
 
 
@@ -80,6 +80,25 @@ def fetch_pages(user_token, version):
     return found
 
 
+def resolve_page_token(token, page_id, version):
+    """Token tài khoản được đổi sang token của đúng Page. Token Page được giữ nguyên."""
+    token = str(token or "").strip()
+    page_id = str(page_id or "").strip()
+    if not token or not page_id:
+        raise FBError("Thiếu token hoặc Page ID.")
+    me = fb_check(requests.get(
+        f"{GRAPH}/{version}/me",
+        params={"fields": "id,name", "access_token": token},
+        timeout=30,
+    ))
+    if str(me.get("id") or "") == page_id:
+        return token, me.get("name") or ""
+    for page in fetch_pages(token, version):
+        if str(page.get("id") or "") == page_id and page.get("access_token"):
+            return page["access_token"], page.get("name") or ""
+    raise FBError("Token này không quản trị Page đang chọn.")
+
+
 def check_page(page, version):
     """Kiểm tra token của Page còn dùng được không; trả về tên Page theo Facebook."""
     resp = requests.get(f"{GRAPH}/{version}/{page['id']}",
@@ -102,7 +121,21 @@ def upload_video(page, path, message, version, schedule_ts=None):
     return fb_check(resp)["id"]
 
 
-def post_comment(page, video_id, text, version):
-    resp = requests.post(f"{GRAPH}/{version}/{video_id}/comments",
-                         data={"message": text, "access_token": page["token"]}, timeout=60)
+def post_comment(page, video_id, text, version, image_path=None):
+    """Bình luận vào video. Có ảnh thì gửi kèm file ảnh."""
+    data = {"message": text, "access_token": page["token"]}
+    url = f"{GRAPH}/{version}/{video_id}/comments"
+    if not image_path:
+        resp = requests.post(url, data=data, timeout=60)
+        return fb_check(resp).get("id")
+    mime = {
+        ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png",
+        ".webp": "image/webp", ".gif": "image/gif",
+    }.get(os.path.splitext(image_path)[1].lower(), "application/octet-stream")
+    with open(image_path, "rb") as handle:
+        resp = requests.post(
+            url, data=data,
+            files={"source": (os.path.basename(image_path), handle, mime)},
+            timeout=120,
+        )
     return fb_check(resp).get("id")

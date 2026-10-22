@@ -33,7 +33,7 @@ FFMPEG_AUDIO_BITRATE = (os.environ.get("DTS_FFMPEG_AUDIO_BR") or "256k").strip()
 CUT_REENCODE_CONCAT = True
 
 # --- 5. TTS ---
-# edge neural > piper medium về độ tự nhiên; auto ưu tiên FPT (nam Bắc) → Edge → Piper.
+# auto: FPT leminh (nam Bắc) → Piper speaker 2 (ổn định, cùng giọng video trước) → Edge.
 TTS_PROVIDER = (os.environ.get("DTS_TTS_PROVIDER") or "auto").strip() or "auto"
 PIPER_MP3_QSCALE = (os.environ.get("DTS_PIPER_QSCALE") or "0").strip() or "0"
 

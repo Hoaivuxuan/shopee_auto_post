@@ -294,15 +294,69 @@ def _resolve_provider(provider: str) -> str:
 
     name = (provider or DEFAULT_PROVIDER).strip().lower() or "auto"
     if name == "auto":
-        # Ưu tiên chất lượng giọng: FPT (nam Bắc) → Edge neural → Piper local
-        if douyin_tts_fpt.configured():
+        # FPT (nam Bắc) → Piper local (giọng ổn định như video trước) → Edge
+        if douyin_tts_fpt.available():
             return "fpt"
+        if douyin_tts_piper.configured():
+            return "piper"
         return "edge"
     if name == "piper" and not douyin_tts_piper.configured():
-        if douyin_tts_fpt.configured():
+        if douyin_tts_fpt.available():
             return "fpt"
         return "edge"
+    if name == "fpt" and not douyin_tts_fpt.available():
+        if douyin_tts_piper.configured():
+            return "piper"
+        return "edge"
     return name
+
+
+def _fallback_provider(failed: str) -> str | None:
+    """Cascade khi provider đang dùng lỗi (429 FPT, …)."""
+    import douyin_tts_piper
+
+    order = ["fpt", "piper", "edge"]
+    try:
+        idx = order.index(failed)
+    except ValueError:
+        idx = -1
+    for name in order[idx + 1 :]:
+        if name == "piper" and not douyin_tts_piper.configured():
+            continue
+        return name
+    return None
+
+
+def _tts_voice_for(provider: str, voice: str, piper_speaker: str) -> tuple[str, str]:
+    """Trả (tts_voice_label, piper_speaker_id)."""
+    if provider == "fpt":
+        fpt_voices = {
+            "leminh", "banmai", "thuminh", "lannhi", "myan",
+            "giahuy", "linhsan", "minhquang", "ngoclam",
+        }
+        return (voice if voice in fpt_voices else DEFAULT_FPT_VOICE), piper_speaker
+    if provider == "piper":
+        spk = voice if str(voice).isdigit() else piper_speaker
+        return f"piper-speaker-{spk}", spk
+    edge = voice if str(voice).startswith("vi-VN-") else DEFAULT_EDGE_VOICE
+    return edge, piper_speaker
+
+
+def _fit_af(raw_dur: float, target: float) -> tuple[str, float]:
+    """Tăng tốc vừa đủ để khít slot, rồi pad/cắt đúng target — tránh lệch phụ đề & cắt đuôi."""
+    target = max(0.5, float(target))
+    raw = max(0.05, float(raw_dur) or target)
+    tempo = 1.0
+    # Cho phép tăng tốc rõ hơn (Edge -15% / câu dài); vẫn dưới ngưỡng nghe "chipmunk".
+    if raw > target * 1.04:
+        tempo = min(1.35, raw / target)
+    parts: list[str] = []
+    if abs(tempo - 1.0) > 0.015:
+        parts.append(f"atempo={tempo:.3f}")
+    parts.append(f"apad=whole_dur={target:.3f}")
+    parts.append(f"atrim=0:{target:.3f}")
+    parts.append("asetpts=PTS-STARTPTS")
+    return ",".join(parts), tempo
 
 
 def synthesize_voice(
@@ -325,84 +379,103 @@ def synthesize_voice(
     if meta_path.is_file() and not force:
         return json.loads(meta_path.read_text(encoding="utf-8"))
 
+    requested = (provider or DEFAULT_PROVIDER).strip().lower() or "auto"
+    # auto/fpt được cascade; ép "piper"/"edge" thì giữ nguyên provider đó
+    allow_fallback = requested in {"", "auto", "fpt"}
     used_provider = _resolve_provider(provider)
     piper_speaker = DEFAULT_PIPER_SPEAKER
     rate = rate or DEFAULT_RATE
-    # FPT: leminh = nam Bắc; Piper: speaker id; Edge: NamMinh
-    if used_provider == "fpt":
-        tts_voice = voice if voice in {
-            "leminh", "banmai", "thuminh", "lannhi", "myan", "giahuy", "linhsan", "minhquang", "ngoclam"
-        } else DEFAULT_FPT_VOICE
-    elif used_provider == "piper":
-        tts_voice = f"piper-speaker-{voice if str(voice).isdigit() else piper_speaker}"
-        piper_speaker = voice if str(voice).isdigit() else DEFAULT_PIPER_SPEAKER
-    else:
-        tts_voice = voice if str(voice).startswith("vi-VN-") else DEFAULT_EDGE_VOICE
+    tts_voice, piper_speaker = _tts_voice_for(used_provider, voice, piper_speaker)
+    fallback_from = None
+    fallback_note = ""
 
-    pieces = []
-    for line in script.get("lines") or []:
-        idx = int(line["index"])
-        mp3 = voice_dir / f"line_{idx:03d}.mp3"
-        wav = voice_dir / f"line_{idx:03d}.wav"
-        text = (line.get("text") or "").strip() or " "
-        if force or not mp3.is_file():
-            if used_provider == "piper":
-                douyin_tts_piper.synthesize_to_mp3(
-                    text,
-                    mp3,
-                    speaker_id=int(piper_speaker),
-                    length_scale=douyin_tts_piper.DEFAULT_LENGTH_SCALE,
-                )
-            elif used_provider == "fpt":
-                douyin_tts_fpt.synthesize_to_mp3(
-                    text, mp3, voice=tts_voice, speed=DEFAULT_FPT_SPEED
-                )
-            else:
-                asyncio.run(_synthesize_one(text, mp3, tts_voice, pitch=pitch, rate=rate))
-        # Chuẩn hóa wav + chỉ tăng tốc nhẹ nếu dài hơn clip (giữ nhịp chậm)
-        target = max(0.8, float(line.get("duration") or 1))
-        raw_dur = probe_duration(mp3) or target
-        tempo = 1.0
-        if raw_dur > target * 1.12:
-            tempo = min(1.08, raw_dur / target)
-        af = f"atempo={tempo:.3f}" if abs(tempo - 1.0) > 0.02 else "anull"
-        _run(
-            [
-                "ffmpeg",
-                "-y",
-                "-i",
-                str(mp3),
-                "-af",
-                af,
-                "-ar",
-                "44100",
-                "-ac",
-                "2",
-                str(wav),
-            ]
-        )
-        dur = probe_duration(wav) or (raw_dur / tempo)
-        pieces.append(
-            {
-                "index": idx,
-                "text": text,
-                "file": str(wav),
-                "duration": round(dur, 3),
-                "out_start": line["out_start"],
-                "out_end": line["out_end"],
-                "tempo": round(tempo, 3),
-            }
-        )
+    def _synth_one_provider(text: str, mp3: Path, prov: str, voice_id: str, spk: str) -> None:
+        if prov == "piper":
+            douyin_tts_piper.synthesize_to_mp3(
+                text,
+                mp3,
+                speaker_id=int(spk),
+                length_scale=douyin_tts_piper.DEFAULT_LENGTH_SCALE,
+            )
+        elif prov == "fpt":
+            douyin_tts_fpt.synthesize_to_mp3(
+                text, mp3, voice=voice_id, speed=DEFAULT_FPT_SPEED
+            )
+        else:
+            asyncio.run(_synthesize_one(text, mp3, voice_id, pitch=pitch, rate=rate))
 
-    # Ghép TTS theo timeline: silence pad + concat
-    total = float((script.get("lines") or [{}])[-1].get("out_end") or 0) if script.get("lines") else 0
-    if not total and pieces:
-        total = max(float(p["out_end"]) for p in pieces)
+    def _clear_line_audio() -> None:
+        for pattern in ("line_*.mp3", "line_*.wav", "silence_*.wav", "tts_full.wav"):
+            for old in voice_dir.glob(pattern):
+                old.unlink(missing_ok=True)
+
+    def _build_pieces() -> list[dict]:
+        built: list[dict] = []
+        for line in script.get("lines") or []:
+            idx = int(line["index"])
+            mp3 = voice_dir / f"line_{idx:03d}.mp3"
+            wav = voice_dir / f"line_{idx:03d}.wav"
+            text = (line.get("text") or "").strip() or " "
+            if force or not mp3.is_file():
+                _synth_one_provider(text, mp3, used_provider, tts_voice, piper_speaker)
+            target = max(0.8, float(line.get("duration") or 1))
+            raw_dur = probe_duration(mp3) or target
+            af, tempo = _fit_af(raw_dur, target)
+            _run(
+                [
+                    "ffmpeg",
+                    "-y",
+                    "-i",
+                    str(mp3),
+                    "-af",
+                    af,
+                    "-ar",
+                    "44100",
+                    "-ac",
+                    "2",
+                    str(wav),
+                ]
+            )
+            dur = probe_duration(wav) or target
+            built.append(
+                {
+                    "index": idx,
+                    "text": text,
+                    "file": str(wav),
+                    "duration": round(dur, 3),
+                    "raw_duration": round(raw_dur, 3),
+                    "out_start": line["out_start"],
+                    "out_end": line["out_end"],
+                    "tempo": round(tempo, 3),
+                }
+            )
+        return built
+
+    while True:
+        try:
+            pieces = _build_pieces()
+            break
+        except douyin_tts_fpt.FptRateLimitError as exc:
+            nxt = _fallback_provider(used_provider) if allow_fallback else None
+            if not nxt:
+                raise
+            fallback_from = used_provider
+            fallback_note = str(exc)
+            used_provider = nxt
+            tts_voice, piper_speaker = _tts_voice_for(
+                used_provider,
+                DEFAULT_PIPER_SPEAKER if used_provider == "piper" else DEFAULT_EDGE_VOICE,
+                piper_speaker,
+            )
+            _clear_line_audio()
+
+    # Ghép TTS theo timeline: silence pad + concat; mỗi câu đã khít slot
     concat_list = voice_dir / "tts_concat.txt"
     built: list[Path] = []
     cursor = 0.0
     for piece in pieces:
         start = float(piece["out_start"])
+        end = float(piece["out_end"])
         gap = start - cursor
         if gap > 0.05:
             silence = voice_dir / f"silence_{len(built):03d}.wav"
@@ -422,7 +495,7 @@ def synthesize_voice(
             built.append(silence)
             cursor += gap
         built.append(Path(piece["file"]))
-        cursor = start + float(piece["duration"])
+        cursor = max(cursor + float(piece["duration"]), end)
 
     tts_wav = voice_dir / "tts_full.wav"
     if len(built) == 1:
@@ -462,8 +535,11 @@ def synthesize_voice(
             "bac"
             if used_provider == "piper"
             or (used_provider == "fpt" and tts_voice == "leminh")
+            or (used_provider == "edge" and "NamMinh" in tts_voice)
             else "general"
         ),
+        "fallback_from": fallback_from,
+        "fallback_reason": fallback_note or None,
         "tts_wav": str(tts_wav),
         "duration": round(probe_duration(tts_wav) or cursor, 3),
         "pieces": pieces,

@@ -5,7 +5,7 @@ RUN pip install --no-cache-dir requests playwright \
     && playwright install --with-deps chromium \
     && rm -rf /var/lib/apt/lists/*
 COPY shopeetool /app/shopeetool
-COPY api_shopee /app/api_shopee
+# api_shopee (curl mẫu) mount từ host qua docker-compose — tránh nhúng cookie vào image.
 
 ENV ADMIN_HOST=0.0.0.0
 ENV ADMIN_PORT=8765

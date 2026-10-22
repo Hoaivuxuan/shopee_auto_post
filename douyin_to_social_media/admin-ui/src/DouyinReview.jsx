@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { IconButton, Icons } from "./icons.jsx";
 import ProgressSteps from "./ProgressSteps.jsx";
+import { AI_FILTERS, hasAiShort } from "./status.js";
 
 export default function DouyinReview({
   videos,
@@ -30,25 +31,48 @@ export default function DouyinReview({
     tiktok: "Đăng bản video ngắn AI lên TikTok",
     instagram: "Đăng bản video ngắn AI lên Instagram Reels",
   }[target] || "Đăng video ngắn";
-  const list = videos || [];
-  const video = list.find((item) => item.id === selectedId) || list[0] || null;
+  const [aiFilter, setAiFilter] = useState("all");
+  const allVideos = videos || [];
+  const list = useMemo(() => {
+    if (aiFilter === "yes") return allVideos.filter(hasAiShort);
+    if (aiFilter === "no") return allVideos.filter((item) => !hasAiShort(item));
+    return allVideos;
+  }, [allVideos, aiFilter]);
+  const video = list.find((item) => item.id === selectedId)
+    || allVideos.find((item) => item.id === selectedId)
+    || list[0]
+    || null;
   const isYoutube = target === "youtube";
   const [draft, setDraft] = useState("");
   const [titleDraft, setTitleDraft] = useState("");
   const [descDraft, setDescDraft] = useState("");
   const [dirty, setDirty] = useState(false);
   const [source, setSource] = useState("original");
+  const [listLimit, setListLimit] = useState(120);
   const pendingCount = list.filter((item) => !item.translated).length;
+  const withAi = allVideos.filter(hasAiShort).length;
+  const aiCounts = { all: allVideos.length, yes: withAi, no: allVideos.length - withAi };
+  const sideList = useMemo(() => {
+    const selected = selectedId || video?.id;
+    const head = list.slice(0, listLimit);
+    if (selected && !head.some((item) => item.id === selected)) {
+      const extra = list.find((item) => item.id === selected)
+        || allVideos.find((item) => item.id === selected);
+      if (extra) return [extra, ...head];
+    }
+    return head;
+  }, [list, allVideos, listLimit, selectedId, video?.id]);
   const batch = translateJob || {};
   const batchRunning = Boolean(batch.running);
   const globalAi = aiJob || {};
 
   useEffect(() => {
-    setDraft(video?.caption_vi || "");
-    setTitleDraft(video?.title_vi || (video?.caption_vi || "").split("\n").find(Boolean) || "");
+    const vi = video?.caption_vi || video?.caption || "";
+    setDraft(vi);
+    setTitleDraft(video?.title_vi || vi.split("\n").find(Boolean) || "");
     setDescDraft(video?.description_vi || "");
     setDirty(false);
-  }, [video?.id, video?.caption_vi, video?.title_vi, video?.description_vi]);
+  }, [video?.id, video?.caption_vi, video?.caption, video?.title_vi, video?.description_vi]);
 
   useEffect(() => {
     const ai = video?.ai || {};
@@ -110,6 +134,14 @@ export default function DouyinReview({
   return (
     <section className="review">
       <aside className="review-list">
+        <div className="choice-list review-ai-filter" role="group" aria-label="Lọc video ngắn">
+          {AI_FILTERS.map(([id, label]) => (
+            <button key={id} type="button" className={aiFilter === id ? "on" : ""} onClick={() => setAiFilter(id)}>
+              <span>{label}</span>
+              <span className="count">{aiCounts[id] ?? 0}</span>
+            </button>
+          ))}
+        </div>
         <div className="review-batch">
           <button
             className="ghost"
@@ -125,7 +157,7 @@ export default function DouyinReview({
           </button>
           {batch.message ? <span className="meta">{batch.message}</span> : null}
         </div>
-        {list.map((item) => {
+        {sideList.map((item) => {
           const tag = aiLabel(item);
           const pub = publishLabel(item);
           return (
@@ -135,7 +167,7 @@ export default function DouyinReview({
               className={item.id === video.id ? "on" : ""}
               onClick={() => onSelect(item.id)}
             >
-              <b>{headline(item.caption_vi) || item.title}</b>
+              <b>{headline(item.caption_vi || item.caption) || item.title}</b>
               <span>
                 {item.translated ? "Đã dịch" : "Chưa dịch"}
                 {tag ? ` · ${tag}` : ""}
@@ -145,6 +177,11 @@ export default function DouyinReview({
             </button>
           );
         })}
+        {list.length > sideList.length ? (
+          <button type="button" className="ghost" onClick={() => setListLimit((n) => n + 100)}>
+            Xem thêm ({list.length - sideList.length})
+          </button>
+        ) : null}
       </aside>
       <div className="review-stage">
         <div className="player">
